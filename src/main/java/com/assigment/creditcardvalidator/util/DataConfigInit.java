@@ -16,7 +16,6 @@ public class DataConfigInit {
         return args -> {
             CreditCard blacklisted1 = new CreditCard("4788384538552446");
             CreditCard blacklisted2 = new CreditCard("5144385438523845");
-
             cardValidatorRepository.saveAll(List.of(blacklisted1, blacklisted2));
         };
     }

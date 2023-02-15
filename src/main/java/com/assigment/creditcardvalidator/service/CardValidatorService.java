@@ -2,9 +2,13 @@ package com.assigment.creditcardvalidator.service;
 
 import com.assigment.creditcardvalidator.entity.CreditCard;
 import com.assigment.creditcardvalidator.exception.*;
+import com.assigment.creditcardvalidator.handler.ErrorResponse;
+import com.assigment.creditcardvalidator.handler.Response;
+import com.assigment.creditcardvalidator.handler.SuccessResponse;
 import com.assigment.creditcardvalidator.repository.CardValidatorRepository;
 import com.assigment.creditcardvalidator.util.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -21,63 +25,63 @@ public class CardValidatorService {
         this.repository = repository;
     }
 
-    public void validateCard(CreditCard creditCard) {
+    public Response validateCard(CreditCard creditCard) {
 
         String cardNumber = creditCard.getNumber();
         String expirationDate = creditCard.getExpirationDate();
 
-        // missing parameters in post request
-        if (cardNumber == null || expirationDate == null) throw new BadPostRequestException();
+        if(!checkPostParameters(cardNumber, expirationDate)) return ErrorResponse.send("badPostRequest");
 
         // purge entered data
-        String purgedCard = purgeCardNumber(cardNumber);
-        String purgedExpirationDate = purgeCardExpirationDate(expirationDate);
+        cardNumber = cardNumber.trim();
+        expirationDate = expirationDate.trim();
 
-        // checking format
-        if (!checkFormat(purgedCard)) throw new MalformedCardException();
+        // invalid card format
+        if (!checkFormat(cardNumber)) return ErrorResponse.send("malformedCard");
+        
+        // remove spaces
+        cardNumber = removeSpaces(cardNumber);
+        
+        // not accepted card
+        if (!checkType(cardNumber)) return ErrorResponse.send("notAccepted");
+        
+        // is in the black list
+        if (isBlacklisted(cardNumber)) return ErrorResponse.send("blacklisted");
+        
+        // is invalid after using Luhn formula
+        if (isInvalidCardNumber(cardNumber)) return ErrorResponse.send("invalidCardNumber");
+        
+        // is invalid date format
+        if (isInvalidDateFormat(expirationDate)) return ErrorResponse.send("invalidDateFormat");
+        
+        // expiration date is before current date
+        if (isInThePast(expirationDate)) return ErrorResponse.send("invalidDate");
 
-        // only digits
-        purgedCard = purgedCard.replaceAll(" ", "");
-
-        // checking type
-        if(!checkCardType(purgedCard)) throw new NotAcceptedCardException();
-
-        // cannot be blacklisted
-        if (isBlacklisted(purgedCard)) throw new BlacklistedCardException();
-
-        // validate against Luhn formula
-        if (!validateCardNumberAgainstLuhnFormula(purgedCard)) throw new InvalidCardNumberException();
-
-        // validate date format
-        if (!isValidDateFormat(purgedExpirationDate)) throw new InvalidDateFormatException();
-
-        // date must be in the future
-        if (!isDateInFuture(purgedExpirationDate)) throw new InvalidDateException();
-
+        return SuccessResponse.send("Credit Card is valid");
     }
 
-    public String purgeCardNumber(String cardNumber) {
-        return cardNumber.trim();
+    public String removeSpaces(String str) {
+        return str.replaceAll(" ", "");
     }
-
-    public String purgeCardExpirationDate(String expirationDate) {return expirationDate.trim();}
+    public boolean checkPostParameters(String cardNumber, String expirationDate) {
+        return cardNumber != null && expirationDate != null;
+    }
     public boolean checkFormat(String cardNumber) {
-        return cardNumber.matches(Pattern.ONLY_NUMBERS) ||
-               cardNumber.matches(Pattern.EACH_FOUR_DIGIT_A_SPACE);
+        return cardNumber.matches(Pattern.ONLY_NUMBERS) || cardNumber.matches(Pattern.EACH_FOUR_DIGIT_A_SPACE);
     }
-    public boolean checkCardType(String cardNumber) {
+    public boolean checkType(String cardNumber) {
         return cardNumber.matches(Pattern.VISA_FORMAT) || cardNumber.matches(Pattern.MASTERCARD_FORMAT);
     }
     public boolean isBlacklisted(String cardNumber) {
         Optional<CreditCard> cardOptional = repository.findById(cardNumber);
         return cardOptional.isPresent();
     }
-    public boolean validateCardNumberAgainstLuhnFormula(String cardNumber) {
+    public boolean isInvalidCardNumber(String cardNumber) {
         int sum = 0;
         int length = cardNumber.length();
         boolean isEven = (length % 2 == 0);
 
-        for (Character c: cardNumber.toCharArray()) {
+        for (Character c : cardNumber.toCharArray()) {
             int digit = Character.getNumericValue(c);
 
             if (isEven) {
@@ -87,14 +91,14 @@ public class CardValidatorService {
             sum += digit;
             isEven = !isEven;
         }
-        return (sum % 10 == 0);
+        return sum % 10 != 0;
     }
-    public boolean isValidDateFormat(String expirationDate) {
-        return expirationDate.matches(Pattern.VALID_DATE_FORMAT);
+    public boolean isInvalidDateFormat(String expirationDate) {
+        return !expirationDate.matches(Pattern.VALID_DATE_FORMAT);
     }
-    public boolean isDateInFuture(String expirationDate) {
+    public boolean isInThePast(String expirationDate) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yy");
         LocalDate date = LocalDate.parse("01/" + expirationDate, formatter);
-        return date.isAfter(LocalDate.now());
+        return date.isBefore(LocalDate.now());
     }
 }
